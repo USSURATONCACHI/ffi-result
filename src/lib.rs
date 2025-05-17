@@ -1,7 +1,7 @@
 use std::{
     fmt::Debug,
-    mem::{ManuallyDrop, MaybeUninit},
-    ops::Deref,
+    mem::ManuallyDrop,
+    ops::{Deref, DerefMut},
 };
 
 /// FFI-compatibe and ABI-stable analogue for [`core::result::Result`].
@@ -78,10 +78,30 @@ impl<T, E> Result<T, E> {
         }
     }
 
-    pub fn ok(mut self) -> Option<T> {
+    pub fn as_mut(&mut self) -> Result<&mut T, &mut E> {
+        Result {
+            kind: self.kind,
+            data: match self.kind {
+                ResultKind::Ok => {
+                    let inner = unsafe { &mut self.data.ok };
+                    ResultData {
+                        ok: ManuallyDrop::new(inner.deref_mut()),
+                    }
+                }
+                ResultKind::Err => {
+                    let inner = unsafe { &mut self.data.err };
+                    ResultData {
+                        err: ManuallyDrop::new(inner.deref_mut()),
+                    }
+                }
+            },
+        }
+    }
+
+    pub fn ok(self) -> Option<T> {
         let kind = self.kind;
-        let mut data = unsafe { MaybeUninit::uninit().assume_init() };
-        std::mem::swap(&mut self.data, &mut data);
+        // SAFETY: we only read the union bits, which are valid for either variant
+        let mut data = unsafe { std::ptr::read(&self.data) };
         std::mem::forget(self);
 
         match kind {
@@ -92,10 +112,10 @@ impl<T, E> Result<T, E> {
             }
         }
     }
-    pub fn err(mut self) -> Option<E> {
+    pub fn err(self) -> Option<E> {
         let kind = self.kind;
-        let mut data = unsafe { MaybeUninit::uninit().assume_init() };
-        std::mem::swap(&mut self.data, &mut data);
+        // SAFETY: we only read the union bits, which are valid for either variant
+        let mut data = unsafe { std::ptr::read(&self.data) };
         std::mem::forget(self);
 
         match kind {
@@ -106,10 +126,10 @@ impl<T, E> Result<T, E> {
             }
         }
     }
-    pub fn into_result(mut self) -> core::result::Result<T, E> {
+    pub fn into_result(self) -> core::result::Result<T, E> {
         let kind = self.kind;
-        let mut data = unsafe { MaybeUninit::uninit().assume_init() };
-        std::mem::swap(&mut self.data, &mut data);
+        // SAFETY: we only read the union bits, which are valid for either variant
+        let data = unsafe { std::ptr::read(&self.data) };
         std::mem::forget(self);
 
         match kind {
@@ -135,9 +155,20 @@ impl<T, E> Result<T, E> {
         self.into_result().map_err(op).into()
     }
 }
+impl<T: Debug, E> Result<T, E> {
+    pub fn unwrap_err(self) -> E {
+        self.into_result().unwrap_err()
+    }
+    pub fn expect_err(self, msg: &str) -> E {
+        self.into_result().expect_err(msg)
+    }
+}
 impl<T, E: Debug> Result<T, E> {
     pub fn unwrap(self) -> T {
         self.into_result().unwrap()
+    }
+    pub fn expect(self, msg: &str) -> T {
+        self.into_result().expect(msg)
     }
 }
 
@@ -180,6 +211,17 @@ impl<T: Clone, E: Clone> Clone for Result<T, E> {
                     },
                 },
             }
+        }
+    }
+}
+
+impl<T: PartialEq, E: PartialEq> PartialEq for Result<T, E> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self.as_ref().into_result(), other.as_ref().into_result()) {
+            (Ok(a), Ok(b)) => a.eq(b),
+            (Err(a), Err(b)) => a.eq(b),
+            (Ok(_), Err(_)) => false,
+            (Err(_), Ok(_)) => false,
         }
     }
 }
