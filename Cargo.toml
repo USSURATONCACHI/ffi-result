@@ -1,0 +1,12 @@
+[package]
+name = "ffi-result"
+description = "FFI-compatibe and ABI-stable analogue for core::result::Result."
+version = "0.1.0"
+edition = "2024"
+authors = ["Redchin Daniil <redchindaniil@gmail.com>"]
+repository = "https://github.com/USSURATONCACHI/ffi-result"
+license-file = "LICENSE"
+keywords = ["ffi", "result"]
+categories = ["development-tools::ffi"]
+
+[dependencies]
